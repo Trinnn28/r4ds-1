@@ -1,0 +1,123 @@
+---
+title: "Billboard Hot 100"
+author: "Trinity Harden"
+format: html
+execute:
+  echo: false
+---
+```{r}
+#| message: false
+library(tidyverse)
+```
+```{r}
+#| cache: true
+billboard <- read_csv("data/billboard.csv", show_col_types = FALSE)
+```
+```{r}
+song_summary <- billboard |>
+  pivot_longer(
+    cols = starts_with("wk"),
+    names_to = "week",
+    values_to = "rank",
+    names_prefix = "wk",
+    names_transform = list(week = as.integer)
+  ) |>
+  filter(!is.na(rank)) |>
+  group_by(artist, track, date.entered) |>
+  summarize(
+    first_rank = first(rank),
+    best_rank = min(rank),
+    first_week_at_best_rank = min(week[rank == min(rank)]),
+    weeks_on_chart = n(),
+    .groups = "drop"
+  )
+
+notable_songs <- bind_rows(
+  song_summary |>
+    filter(best_rank == 1) |>
+    arrange(first_week_at_best_rank, artist, track) |>
+    slice_head(n = 1) |>
+    mutate(notable = "Fastest to #1"),
+  song_summary |>
+    filter(best_rank == 1) |>
+    arrange(desc(first_week_at_best_rank), artist, track) |>
+    slice_head(n = 1) |>
+    mutate(notable = "Slowest to #1"),
+  song_summary |>
+    filter(best_rank <= 10) |>
+    arrange(desc(weeks_on_chart), artist, track) |>
+    slice_head(n = 1) |>
+    mutate(notable = "Longest top-10 chart run")
+) |>
+  select(
+    notable, artist, track, first_rank, best_rank,
+    first_week_at_best_rank, weeks_on_chart
+  )
+
+notable_songs |>
+  print(width = Inf)
+```
+```{r}
+top_10_songs <- billboard |>
+  pivot_longer(
+    cols = starts_with("wk"),
+    names_to = "week",
+    values_to = "rank",
+    names_prefix = "wk",
+    names_transform = list(week = as.integer)
+  ) |>
+  filter(!is.na(rank)) |>
+  inner_join(
+    song_summary |> filter(best_rank <= 10),
+    by = c("artist", "track", "date.entered")
+  ) |>
+  left_join(
+    notable_songs |>
+      transmute(
+        artist,
+        track,
+        highlight = paste(artist, track, sep = " - ")
+      ),
+    by = c("artist", "track")
+  )
+
+ggplot(
+  top_10_songs,
+  aes(x = week, y = rank, group = interaction(artist, track, date.entered))
+) +
+  geom_line(
+    data = filter(top_10_songs, is.na(highlight)),
+    color = "gray70",
+    alpha = 0.5
+  ) +
+  geom_line(
+    data = filter(top_10_songs, !is.na(highlight)),
+    aes(color = highlight),
+    linewidth = 1
+  ) +
+  scale_y_reverse() +
+  labs(
+    x = "Week",
+    y = "Chart ranking",
+    color = "Notable songs"
+  )
+```
+```{r}
+billboard |>
+  summarize(
+    across(
+      c(wk1, wk4, wk10, wk20, wk40, wk76),
+      list(
+        missing = \(x) sum(is.na(x)),
+        present = \(x) sum(!is.na(x))
+      )
+    )
+  ) |>
+  pivot_longer(
+    everything(),
+    names_to = c("week", "status"),
+    names_sep = "_",
+    values_to = "rankings"
+  ) |>
+  pivot_wider(names_from = status, values_from = rankings)
+```
